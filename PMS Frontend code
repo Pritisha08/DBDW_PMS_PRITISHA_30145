@@ -1,0 +1,192 @@
+import streamlit as st
+import backend_pms as db
+from datetime import date
+import pandas as pd
+
+st.set_page_config(layout="wide")
+st.title("Performance Management System by Pritisha_30145")
+
+# --- User & Role Selection (Simulates login) ---
+all_employees = db.get_all_employees()
+
+if not all_employees:
+    st.warning("No employees found in the system. Please add employees in the backend.")
+    st.stop()
+
+employee_dict = {f"{e[1]} {e[2]} ({e[3]})": e[0] for e in all_employees}
+selected_employee_name = st.sidebar.selectbox("Select User", options=list(employee_dict.keys()))
+
+# Defensive check in case selectbox returns None
+if selected_employee_name is None or selected_employee_name not in employee_dict:
+    st.warning("Please select a valid employee.")
+    st.stop()
+
+selected_employee_id = employee_dict[selected_employee_name]
+selected_employee_role = [e[3] for e in all_employees if e[0] == selected_employee_id][0]
+
+st.sidebar.header(f"Logged in as: {selected_employee_role}")
+is_manager = selected_employee_role == "Manager"
+
+# --- Main App Navigation ---
+st.header("Dashboard")
+tab1, tab2, tab3, tab4 = st.tabs(["Goal & Task Setting", "Progress Tracking", "Feedback", "Reporting & Analytics"])
+
+with tab1:
+    st.header("Goal & Task Setting")
+    if is_manager:
+        st.subheader("Create a New Goal")
+        with st.form("goal_form"):
+            employee_options = [e[0] for e in all_employees if e[3] == 'Employee']
+            if employee_options:
+                goal_employee_id = st.selectbox(
+                    "Assign Goal to:",
+                    options=employee_options,
+                    format_func=lambda x: [e[1] + " " + e[2] for e in all_employees if e[0] == x][0]
+                )
+                goal_description = st.text_area("Goal Description")
+                goal_due_date = st.date_input("Due Date", date.today())
+                submit_goal = st.form_submit_button("Create Goal")
+                if submit_goal:
+                    db.create_goal(goal_employee_id, goal_description, goal_due_date, selected_employee_id)
+                    st.success("Goal created successfully!")
+            else:
+                st.info("No employees available to assign goals.")
+
+    st.subheader("Your Goals & Tasks")
+    my_goals = db.get_goals_for_employee(selected_employee_id)
+    if not my_goals.empty:
+        for index, row in my_goals.iterrows():
+            with st.expander(f"**Goal:** {row['description']} (Due: {row['due_date']}) - Status: **{row['status']}**"):
+                st.write("---")
+                st.write("#### Tasks for this Goal")
+                tasks = db.get_tasks_for_goal(row['goal_id'])
+                if not tasks.empty:
+                    st.dataframe(tasks, use_container_width=True)
+                    if is_manager:
+                        st.subheader("Manage Tasks")
+                        task_id = st.selectbox("Select Task to Update", options=tasks['task_id'], key=f"task_sel_{row['goal_id']}")
+                        new_task_status = st.selectbox("New Status", ['Approved', 'Rejected', 'Completed'], key=f"task_status_sel_{row['goal_id']}")
+                        if st.button("Update Task Status", key=f"task_btn_{row['goal_id']}"):
+                            db.update_task_status(task_id, new_task_status)
+                            st.experimental_rerun()
+                else:
+                    st.info("No tasks for this goal yet.")
+
+                if not is_manager:
+                    st.subheader("Propose a New Task")
+                    with st.form(f"task_form_{row['goal_id']}"):
+                        task_desc = st.text_input("Task Description")
+                        submit_task = st.form_submit_button("Propose Task")
+                        if submit_task:
+                            db.create_task(row['goal_id'], task_desc, selected_employee_id)
+                            st.success("Task proposed successfully!")
+    else:
+        st.info("You have no goals assigned.")
+
+with tab2:
+    st.header("Progress Tracking")
+    if is_manager:
+        st.subheader("Update Goal Status")
+        all_goals = db.get_goals_for_employee(selected_employee_id) # Manager can view their own goals too
+        if not all_goals.empty:
+            goal_to_update = st.selectbox("Select Goal", options=all_goals['goal_id'], format_func=lambda x: all_goals.loc[all_goals['goal_id'] == x, 'description'].iloc[0])
+            new_goal_status = st.selectbox("New Goal Status", options=['Draft', 'In Progress', 'Completed', 'Cancelled'])
+            if st.button("Update Goal Status"):
+                db.update_goal_status(goal_to_update, new_goal_status)
+                st.success("Goal status updated!")
+        else:
+            st.info("No goals to manage.")
+
+    if not is_manager:
+        st.subheader("My Progress")
+        my_goals_progress = db.get_goals_for_employee(selected_employee_id)
+        if not my_goals_progress.empty:
+            completed_count = my_goals_progress[my_goals_progress['status'] == 'Completed'].shape[0]
+            in_progress_count = my_goals_progress[my_goals_progress['status'] == 'In Progress'].shape[0]
+            total_goals = my_goals_progress.shape[0]
+            
+            if total_goals > 0:
+                completed_percent = (completed_count / total_goals) * 100
+                st.metric("Completion Rate", f"{completed_percent:.2f}%", help="Percentage of your goals that are completed.")
+            
+            st.write(f"**Completed Goals:** {completed_count}")
+            st.write(f"**In Progress Goals:** {in_progress_count}")
+            
+            st.dataframe(my_goals_progress, use_container_width=True)
+
+with tab3:
+    st.header("Feedback")
+    if is_manager:
+        st.subheader("Provide Feedback")
+        employee_feedback_options = [e[0] for e in all_employees if e[3] == 'Employee']
+        if employee_feedback_options:
+            employee_feedback_target = st.selectbox(
+                "Select Employee",
+                options=employee_feedback_options,
+                format_func=lambda x: [e[1] + " " + e[2] for e in all_employees if e[0] == x][0]
+            )
+            employee_goals = db.get_goals_for_employee(employee_feedback_target)
+            if not employee_goals.empty:
+                goal_feedback_target = st.selectbox("Select Goal", options=employee_goals['goal_id'], format_func=lambda x: employee_goals.loc[employee_goals['goal_id'] == x, 'description'].iloc[0])
+                feedback_text = st.text_area("Your Feedback")
+                if st.button("Submit Feedback"):
+                    db.create_feedback(goal_feedback_target, employee_feedback_target, selected_employee_id, feedback_text)
+                    st.success("Feedback submitted!")
+            else:
+                st.warning("This employee has no goals to provide feedback on.")
+        else:
+            st.info("No employees available for feedback.")
+    
+    st.subheader("View Feedback")
+    my_feedback = db.get_feedback_for_employee(selected_employee_id)
+    if not my_feedback.empty:
+        st.dataframe(my_feedback, use_container_width=True)
+    else:
+        st.info("You have no feedback records.")
+
+with tab4:
+    st.header("Reporting & Analytics")
+    st.subheader("Key Business Insights")
+    insights = db.get_insights()
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("Total Goals", insights.get("total_goals", 0))
+        st.metric("Approved Tasks", insights.get("approved_tasks", 0))
+        
+    with col2:
+        st.metric("Avg. Goals/Employee", insights.get("avg_goals_per_employee", 0))
+        st.metric("Pending Tasks", insights.get("pending_tasks", 0))
+        
+    with col3:
+        if insights.get("total_goals", 0) > 0:
+            completed_percent = (insights.get("completed_goals", 0) / insights.get("total_goals", 0)) * 100
+            in_progress_percent = (insights.get("in_progress_goals", 0) / insights.get("total_goals", 0)) * 100
+            st.metric("% Completed Goals", f"{completed_percent:.2f}%")
+            st.metric("% In Progress Goals", f"{in_progress_percent:.2f}%")
+    
+    st.subheader("Employee Performance History")
+    if all_employees:
+        selected_hist_employee = st.selectbox(
+            "Select Employee to View History",
+            options=[e[0] for e in all_employees],
+            format_func=lambda x: [e[1] + " " + e[2] for e in all_employees if e[0] == x][0],
+            key="hist_sel"
+        )
+        
+        st.markdown(f"#### Goals for {selected_hist_employee}")
+        employee_hist_goals = db.get_goals_for_employee(selected_hist_employee)
+        if not employee_hist_goals.empty:
+            st.dataframe(employee_hist_goals, use_container_width=True)
+        else:
+            st.info("No goals found for this employee.")
+        
+        st.markdown(f"#### Feedback for {selected_hist_employee}")
+        employee_hist_feedback = db.get_feedback_for_employee(selected_hist_employee)
+        if not employee_hist_feedback.empty:
+            st.dataframe(employee_hist_feedback, use_container_width=True)
+        else:
+            st.info("No feedback found for this employee.")
+    else:
+        st.info("No employees available for history view.")
