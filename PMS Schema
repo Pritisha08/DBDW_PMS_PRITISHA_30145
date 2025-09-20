@@ -1,0 +1,32 @@
+CREATE TABLE employees (
+    employee_id SERIAL PRIMARY KEY,
+    first_name VARCHAR(100) NOT NULL,
+    last_name VARCHAR(100) NOT NULL,
+    role VARCHAR(50) CHECK (role IN ('Manager', 'Employee')) NOT NULL
+);
+
+CREATE TABLE goals (
+    goal_id SERIAL PRIMARY KEY,
+    employee_id INT REFERENCES employees(employee_id),
+    description TEXT NOT NULL,
+    due_date DATE,
+    status VARCHAR(20) CHECK (status IN ('Draft', 'In Progress', 'Completed', 'Cancelled')) DEFAULT 'Draft',
+    created_by INT REFERENCES employees(employee_id)
+);
+
+CREATE TABLE tasks (
+    task_id SERIAL PRIMARY KEY,
+    goal_id INT REFERENCES goals(goal_id),
+    description TEXT NOT NULL,
+    status VARCHAR(20) CHECK (status IN ('Pending', 'Approved', 'Rejected', 'Completed')) DEFAULT 'Pending',
+    created_by INT REFERENCES employees(employee_id)
+);
+
+CREATE TABLE feedback (
+    feedback_id SERIAL PRIMARY KEY,
+    goal_id INT REFERENCES goals(goal_id),
+    employee_id INT REFERENCES employees(employee_id),
+    manager_id INT REFERENCES employees(employee_id),
+    feedback_text TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
